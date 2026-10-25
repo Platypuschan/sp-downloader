@@ -1,0 +1,68 @@
+name: Container
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: python -m unittest -v
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: GHCR-Anmeldung
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image bauen und veröffentlichen
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/platypuschan/sp-downloader:latest
+            ghcr.io/platypuschan/sp-downloader:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Veröffentlichtes Image abrufen und mit Testmedien prüfen
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          SP_IMAGE="ghcr.io/platypuschan/sp-downloader:sha-${GITHUB_SHA}"
+          docker pull "$SP_IMAGE"
+          mkdir -p "$RUNNER_TEMP/sp-smoke"
+          docker run --rm --entrypoint python \
+            -v "$GITHUB_WORKSPACE/tests:/tests:ro" \
+            -v "$RUNNER_TEMP/sp-smoke:/data" \
+            -e DOWNLOAD_DIR=/data/fertig -e WORK_DIR=/data/arbeit \
+            "$SP_IMAGE" /tests/container_smoke.py

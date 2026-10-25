@@ -1,0 +1,10 @@
+services:
+  southpark:
+    image: ghcr.io/platypuschan/sp-downloader:latest
+    init: true
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+    environment:
+      DOWNLOAD_DIR: ${DOWNLOAD_DIR:-/data/downloads}
+      WORK_DIR: ${WORK_DIR:-/data/work}
+    command: ["download"]
